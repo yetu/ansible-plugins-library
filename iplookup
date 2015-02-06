@@ -1,4 +1,18 @@
 #!/usr/bin/python
+__author__ = 'Adham Helal'
+
+DOCUMENTATION = '''
+---
+module: iplookup
+short_description: Checks the certain range of IPs based on regex in your network. 
+description:
+   - Checks the certain range of IPs based on regex in your network. 
+version_added: "0.1.0"
+options:
+
+dependencies:
+
+'''
 
 import re
 
