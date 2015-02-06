@@ -1,0 +1,6 @@
+# this is a virtual module that is entirely implemented server side
+
+# The module is a fork of include action plugin that allows recurseive include of variable
+
+
+# action_plugins are a special type of module, or a compliment to existing modules.  action_plugins get run on the ‘master’ instead of on the target
