@@ -1,0 +1,95 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+__author__ = 'Adham Helal'
+
+DOCUMENTATION = '''
+---
+module: jenkins_trigger
+short_description: Trigger a job in jenkins with/without parameters
+version_added: "0.0.1"
+options:
+    name:
+        description:
+          - Jenkins job name
+        required: true
+        default: null
+        aliases: ['']
+
+    url:
+        description:
+          - Jenkins job url
+        required: true
+        default: 'present'
+        choices: ['present', 'absent', 'running', 'stopped']
+        aliases: ['']
+
+    parm:
+        description:
+            - A dictionary of parameters to inject  in job
+        required: false
+        default: null
+        aliases: ['']
+'''
+
+EXAMPLES = '''
+- name: Trigger a job
+  jenkins_trigger:
+     name="test-remote_trigger"
+     url="http://ah-control000.yetudev.com:8080"
+  args:
+    parm:
+        x: 1
+        y: 2
+        z: 3
+'''
+
+
+class JenkinTrigger():
+    def __init__(self, module):
+        self.module = module
+        self.job_name = self.module.params['name']
+        self.jenkins_url = self.module.params['url']
+        self.jenkins_parm = self.module.params['parm']
+
+    def main(self):
+        try:
+            J = Jenkins(self.jenkins_url)
+        except Exception, e:
+            self.module.fail_json(msg="Jenkins connection to '{}' Issue: ".format(self.jenkins_url, e.message))
+
+        try:
+            J.build_job(self.job_name, self.jenkins_parm)
+        except jenkinsapi.custom_exceptions.UnknownJob:
+
+            self.module.fail_json(msg="Job '{}' does not exist on '{}'".format(self.job_name, self.jenkins_url))
+
+        self.module.exit_json(changed=True, msg="Job triggered.", job_name=self.job_name, jenkins_url=self.jenkins_url)
+
+
+def main():
+    module = AnsibleModule(
+        argument_spec=dict(
+            name=dict(default=None, required=True),
+            url=dict(default=None, required=True),
+            parm=dict(default=None, type="dict")
+        ),
+        # No need to support check mode
+        supports_check_mode=False
+    )
+    JenkinTrigger(module).main()
+    if not jenkinsapi_client_found:
+        module.fail_json(msg="The Jenkins Trigger module requires jenkinsapi library. use 'pip install jenkinsapi' ")
+
+try:
+    from jenkinsapi.jenkins import Jenkins
+    import jenkinsapi
+except ImportError:
+    jenkinsapi_client_found = False
+else:
+    jenkinsapi_client_found = True
+
+# import module snippets
+from ansible.module_utils.basic import *
+main()
+

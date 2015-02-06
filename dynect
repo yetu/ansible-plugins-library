@@ -1,0 +1,226 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+#
+# WARNING This code is still under test
+#
+__author__ = 'Adham Helal'
+
+DOCUMENTATION = '''
+---
+module: dynect
+short_description: Add or remove dns entries in dynect
+description:
+   - Add or remove dynect from a remote host.
+version_added: "0.0.3"
+options:
+
+dependencies:
+    dynect_client
+    To pip install DynectDNS
+
+'''
+
+
+# A Class to compare between new and old records
+class HostTemplate():
+    def __init__(self, domain="", data="", rtype="", hostname="", ttl=""):
+        self.domain = domain
+        self.data = data
+        self.rtype = rtype
+        self.hostname = hostname
+        self.ttl = ttl
+
+
+class DynectHost():
+    def __init__(self, module):
+        self.module = module
+        self.customer_name = self.module.params["customer_name"]
+        self.username = self.module.params["username"]
+        self.password = module.params["password"]
+        self.realRecord = HostTemplate()
+        self.newRecord = HostTemplate()
+        self.newRecord.domain = module.params["domain"]
+        self.newRecord.data = module.params["linkname"]
+        self.newRecord.rtype = module.params["rtype"]
+        self.newRecord.hostname = module.params["hostname"]
+        self.newRecord.ttl = self.module.params["ttl"]
+        self.query_method = self.module.params["query_method"]
+        self.rest_iface = DynectRest()
+        self.record_id = False
+        self.recordInfo = ""
+        self.state = self.module.params["state"]
+        # dynect request
+        self.http_req = ""
+        self.attr_type = ""
+        try:
+            # Log in
+            arguments = {'customer_name': self.customer_name, 'user_name': self.username, 'password': self.password}
+            response = self.rest_iface.execute('/Session/', 'POST', arguments)
+            if response['status'] != 'success':
+                self.module.fail_json(msg="Incorrect credentials")
+        except Exception, e:
+            self.module.fail_json(msg="Connection error : %s" % e)
+
+    def dynect_publish(self):
+        args = {'publish': 'True'}
+        try:
+            self.recordInfo = self.rest_iface.execute('/Zone/' + self.newRecord.domain, 'PUT', args)
+        except Exception, e:
+            self.module.fail_json(msg="Failed to publish domain : %s" % e)
+        if self.recordInfo['status'] == 'success':
+            return True
+        else:
+            return False
+
+    def dynect_pre_request(self):
+        if self.newRecord.rtype == "A":
+            self.http_req = "ARecord"
+            self.attr_type = "address"
+        else:
+            self.http_req = "CNAMERecord"
+            self.attr_type = "cname"
+
+    def dynect_get_record(self):
+        # TODO: Will fail if record has mutli fields i.e. 2 mx records or 3 A with round robin
+        if not self.record_id:
+            self.dynect_pre_request()
+            try:
+                self.recordInfo = self.rest_iface.execute('/' + self.http_req + '/' + self.newRecord.domain + '/' + self.newRecord.hostname, 'GET')
+            except Exception, e:
+                self.module.fail_json(msg="Failed to get dynect record: %s" % e)
+            if self.recordInfo['status'] != 'success':
+                self.module.fail_json(msg="Failed to get dynect record : %s" % self.recordInfo)
+            self.record_id = self.recordInfo["data"]
+
+    def dynect_create_update_record(self, req_type="POST"):
+        self.dynect_pre_request()
+        args = {'ttl': self.newRecord.ttl, 'rdata': {self.attr_type: self.newRecord.data}}
+        if req_type == "POST":
+            req_string = '/' + self.http_req + '/' + self.newRecord.domain + '/' + self.newRecord.hostname
+        elif req_type == "PUT":
+            if len(self.record_id[0]) == 0:
+                # Will fail if record is different type. i.e. orignal record is A and updating to CNAME
+                self.module.fail_json(msg="Request returned an empty JSON. This probably your try")
+            else:
+                req_string = self.record_id[0]
+        try:
+            self.recordInfo = self.rest_iface.execute(req_string, req_type, args)
+        except Exception, e:
+            self.module.fail_json(msg="Failed to create/update dynect record request: %s, type:%s, Error: %s" % (req_string, req_type, e))
+        if self.recordInfo['status'] == 'success':
+            return self.dynect_publish()
+        else:
+            return False
+
+    def dynect_delete_record(self):
+        self.dynect_get_record()
+        try:
+            self.recordInfo = self.rest_iface.execute(self.record_id[0], 'DELETE')
+        except Exception, e:
+            self.module.fail_json(msg="Failed to Delete dynect record: %s" % e)
+        if self.recordInfo['status'] == 'success':
+            return self.dynect_publish()
+        else:
+            return False
+
+    def dynect_logout(self):
+        try:
+            # Logout
+            self.rest_iface.execute('/Session/', 'DELETE')
+        except Exception, e:
+            self.recordInfo += " Failed to logout: %s" % e
+
+    def record_match(self):
+        condition = True
+        if self.query_method == "API":
+            condition &= self.newRecord.domain == self.realRecord.domain
+            condition &= self.newRecord.ttl == self.realRecord.ttl
+            condition &= self.newRecord.data == self.realRecord.data
+            condition &= self.newRecord.rtype == self.realRecord.rtype
+            condition &= self.newRecord.hostname == self.realRecord.hostname
+        # dig match only compare hostname/IP
+        condition &= self.newRecord.data == self.realRecord.data
+        # condition &= self.newRecord.hostname == self.realRecord.hostname
+        return condition
+
+    def record_exist(self):
+        if self.query_method == "API":
+            # TODO: Use dynect API to resolve or not API calls are exepnsive
+            self.module.fail_json(msg="API CHECK NOT YET WORKING")
+        else:
+            # Use dig to resolve
+            import subprocess
+            dns_server = "@ns1.p22.dynect.net"
+            p = subprocess.Popen(["dig", "+short", self.newRecord.hostname, dns_server], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False)
+            (output, err) = p.communicate()
+            if p.returncode == 0:
+                if output:
+                    output = output.partition("\n")[0]
+                    if output[-1] == ".":
+                        output = output[:-1]
+                    self.realRecord.data = output
+                    # record exist
+                    return True
+            else:
+                self.module.fail_json(msg="unable to use dig command to resolve: %s" % self.newRecord.hostname)
+        # No match record does not exists
+        return False
+
+    def host_create(self):
+        req_type = "POST"
+        if self.record_exist():
+            if self.record_match():
+                # no need to change anything
+                return False
+            else:
+                # Get record_id and Update record
+                self.dynect_get_record()
+                req_type = "PUT"
+        # Create/update record
+        return self.dynect_create_update_record(req_type)
+
+    def host_delete(self):
+        if self.record_exist():
+            return self.dynect_delete_record()
+        else:
+            return False
+
+    def main(self):
+        if self.state == "present":
+            changed = self.host_create()
+        else:
+            changed = self.host_delete()
+        self.module.exit_json(changed=changed, msg=self.recordInfo)
+
+
+def main():
+        module = AnsibleModule(
+            argument_spec=dict(
+                customer_name=dict(required=True),
+                username=dict(required=True),
+                password=dict(required=True),
+                domain=dict(required=True),
+                state=dict(default="present", choices=["absent", "present"]),
+                linkname=dict(required=True),
+                rtype=dict(default="A", choices=["A", "CNAME"]),
+                hostname=dict(default=""),
+                query_method=dict(default="dig", choices=["dig", "api"]),
+                ttl=dict(default=3600, type="int"),
+            ),
+            # For now dont support check_mode
+            supports_check_mode=False
+        )
+        if not dynect_client_found:
+            module.fail_json(msg="The ansible dynect module requires DynectDNS library. use 'pip install DynectDNS' ")
+        DynectHost(module).main()
+
+try:
+    from dynect.DynectDNS import DynectRest
+except ImportError:
+    dynect_client_found = False
+else:
+    dynect_client_found = True
+
+# import module snippets
+from ansible.module_utils.basic import *
+main()

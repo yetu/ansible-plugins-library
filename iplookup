@@ -1,0 +1,88 @@
+#!/usr/bin/python
+
+import re
+
+class Rules():
+    def __init__(self, module):
+        self.module = module
+        self.ips = self.module.params["ips"]
+        self.ips_str = self.module.params["ips_str"]
+        self.rules = module.params["rules"]
+        self.fallback = module.params["fallback"]
+        if self.ips and self.ips_str:
+            module.fail_json(msg="ips and ip_str are mutual exclusive.")
+        elif not self.ips and not self.ips_str:
+            module.fail_json(msg="ips or ip_str are required.")
+
+        if self.ips_str:
+            self.ips = self.ips_str.split(",")
+
+    def _regex(self, value='', pattern='', ignorecase=False, match_type='search'):
+        ''' Expose `re` as a boolean filter using the `search` method by default.
+            This is likely only useful for `search` and `match` which already
+            have their own filters.
+        '''
+
+        if ignorecase:
+            flags = re.I
+        else:
+            flags = 0
+        _re = re.compile(pattern, flags=flags)
+
+        return bool(getattr(_re, match_type, 'search')(value))
+
+    def match(self):
+        for rule in self.rules:  # Loop over all rules
+            # Check what type of match default True if not defined
+            if isinstance(rule.get("reg_match"), bool) or isinstance(rule.get("reg_match"), str) :
+                rule_boolean = rule.get("reg_match")
+            else:
+                rule_boolean = rule.get("match", True)
+            if not isinstance(rule_boolean, bool):
+                if str(rule["match"]).lower() in {"false", "no", "0"}:
+                    rule_boolean = False
+                elif str(rule["match"]).lower() in {"true", "yes", "1"}:
+                    rule_boolean = True
+                else:
+                    self.module.fail_json(msg="Unknow reg_match type '%s' should be boolean" % rule["match"])
+            # Ops syntax error
+            if not rule.get("regx"):
+                self.module.fail_json(msg="Syntax error in rule '%s' is missing regx" % rule)
+
+            for ip in self.ips:  # Loop over all ips
+                ip = ip.strip()
+                match_ip = self._regex(ip, rule["regx"], False, "match")
+                if match_ip == rule_boolean:
+                    return rule, ip
+        # Fallback to first IP or fail
+        if self.fallback:
+            return "Fallback", self.ips[0]
+        else:
+            self.module.fail_json(msg="No matching rule")
+
+        return False, False
+
+    def main(self):
+        matched_rule, matched_ip = self.match()
+        if matched_rule:
+            self.module.exit_json(changed=False, match=True, matched_ip=matched_ip, matched_rule=matched_rule)
+        else:
+            self.module.exit_json(changed=False, match=False, matched_ip="")
+
+
+def main():
+        module = AnsibleModule(
+            argument_spec=dict(
+                ips=dict(default=None, required=False, type="list"),
+                ips_str=dict(default=None, required=False),
+                rules=dict(default=None, type="list", required=True),
+                fallback=dict(default=True, choices=BOOLEANS, type="bool"),
+            ),
+            # No need to support check mode
+            supports_check_mode=False
+        )
+        Rules(module).main()
+
+# import module snippets
+from ansible.module_utils.basic import *
+main()
