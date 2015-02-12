@@ -4,7 +4,6 @@ modules in this repositories are used internally by us, each module is well docu
 
 * **dynect** : Add or remove dns entries in dynect
 * **iplookup** : Checks the certain range of IPs based on regex in your network. 
-* **jenkins_trigger** : Trigger a job in jenkins with/without parameters. 
 * **joyent**: Manage instances in joyent SDC cloud
 
 
