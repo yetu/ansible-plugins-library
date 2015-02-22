@@ -11,7 +11,7 @@ module: dynect
 short_description: Add or remove dns entries in dynect
 description:
    - Add or remove dynect from a remote host.
-version_added: "0.0.3"
+version_added: "0.0.4"
 options:
 
 dependencies:
@@ -23,7 +23,7 @@ dependencies:
 
 # A Class to compare between new and old records
 class HostTemplate():
-    def __init__(self, domain="", data="", rtype="", hostname="", ttl=""):
+    def __init__(self, domain=None, data=None, rtype=None, hostname=None, ttl=None):
         self.domain = domain
         self.data = data
         self.rtype = rtype
@@ -34,24 +34,31 @@ class HostTemplate():
 class DynectHost():
     def __init__(self, module):
         self.module = module
+        # Create compare classes
+        self.real_record = HostTemplate()
+        self.new_record = HostTemplate()
+        # Assign Parms
         self.customer_name = self.module.params["customer_name"]
         self.username = self.module.params["username"]
         self.password = module.params["password"]
-        self.realRecord = HostTemplate()
-        self.newRecord = HostTemplate()
-        self.newRecord.domain = module.params["domain"]
-        self.newRecord.data = module.params["linkname"]
-        self.newRecord.rtype = module.params["rtype"]
-        self.newRecord.hostname = module.params["hostname"]
-        self.newRecord.ttl = self.module.params["ttl"]
+        self.new_record.domain = module.params["domain"]
+        self.new_record.data = module.params["linkname"]
+        self.new_record.rtype = module.params["rtype"]
+        self.new_record.hostname = module.params["hostname"]
+        self.new_record.ttl = self.module.params["ttl"]
         self.query_method = self.module.params["query_method"]
         self.rest_iface = DynectRest()
         self.record_id = False
         self.recordInfo = ""
         self.state = self.module.params["state"]
-        # dynect request
-        self.http_req = ""
-        self.attr_type = ""
+        # dynect request types
+        self.http_req = None
+        self.attr_type = None
+        self.http_method = "POST"  # Default type POST
+        # Do a login
+        self.login()
+
+    def login(self):
         try:
             # Log in
             arguments = {'customer_name': self.customer_name, 'user_name': self.username, 'password': self.password}
@@ -64,16 +71,17 @@ class DynectHost():
     def dynect_publish(self):
         args = {'publish': 'True'}
         try:
-            self.recordInfo = self.rest_iface.execute('/Zone/' + self.newRecord.domain, 'PUT', args)
+            self.recordInfo = self.rest_iface.execute('/Zone/' + self.new_record.domain, 'PUT', args)
         except Exception, e:
             self.module.fail_json(msg="Failed to publish domain : %s" % e)
+        self.status = self.recordInfo['status']
         if self.recordInfo['status'] == 'success':
             return True
         else:
             return False
 
     def dynect_pre_request(self):
-        if self.newRecord.rtype == "A":
+        if self.new_record.rtype == "A":
             self.http_req = "ARecord"
             self.attr_type = "address"
         else:
@@ -85,7 +93,8 @@ class DynectHost():
         if not self.record_id:
             self.dynect_pre_request()
             try:
-                self.recordInfo = self.rest_iface.execute('/' + self.http_req + '/' + self.newRecord.domain + '/' + self.newRecord.hostname, 'GET')
+                self.recordInfo = self.rest_iface.execute('/' + self.http_req + '/' + self.new_record.domain + '/' + 
+                                                          self.new_record.hostname, 'GET')
             except Exception, e:
                 self.module.fail_json(msg="Failed to get dynect record: %s" % e)
             if self.recordInfo['status'] != 'success':
@@ -94,19 +103,20 @@ class DynectHost():
 
     def dynect_create_update_record(self, req_type="POST"):
         self.dynect_pre_request()
-        args = {'ttl': self.newRecord.ttl, 'rdata': {self.attr_type: self.newRecord.data}}
+        args = {'ttl': self.new_record.ttl, 'rdata': {self.attr_type: self.new_record.data}}
         if req_type == "POST":
-            req_string = '/' + self.http_req + '/' + self.newRecord.domain + '/' + self.newRecord.hostname
+            req_string = '/' + self.http_req + '/' + self.new_record.domain + '/' + self.new_record.hostname
         elif req_type == "PUT":
             if len(self.record_id[0]) == 0:
-                # Will fail if record is different type. i.e. orignal record is A and updating to CNAME
+                # Will fail if record is different type. i.e. original record is A and updating to CNAME
                 self.module.fail_json(msg="Request returned an empty JSON. This probably your try")
             else:
                 req_string = self.record_id[0]
         try:
             self.recordInfo = self.rest_iface.execute(req_string, req_type, args)
         except Exception, e:
-            self.module.fail_json(msg="Failed to create/update dynect record request: %s, type:%s, Error: %s" % (req_string, req_type, e))
+            self.module.fail_json(msg="Failed to create/update dynect record request: %s, type:%s, Error: %s" % 
+                                      (req_string, req_type, e))
         if self.recordInfo['status'] == 'success':
             return self.dynect_publish()
         else:
@@ -133,36 +143,38 @@ class DynectHost():
     def record_match(self):
         condition = True
         if self.query_method == "API":
-            condition &= self.newRecord.domain == self.realRecord.domain
-            condition &= self.newRecord.ttl == self.realRecord.ttl
-            condition &= self.newRecord.data == self.realRecord.data
-            condition &= self.newRecord.rtype == self.realRecord.rtype
-            condition &= self.newRecord.hostname == self.realRecord.hostname
+            condition &= self.new_record.domain == self.real_record.domain
+            condition &= self.new_record.ttl == self.real_record.ttl
+            condition &= self.new_record.data == self.real_record.data
+            condition &= self.new_record.rtype == self.real_record.rtype
+            condition &= self.new_record.hostname == self.real_record.hostname
         # dig match only compare hostname/IP
-        condition &= self.newRecord.data == self.realRecord.data
-        # condition &= self.newRecord.hostname == self.realRecord.hostname
+        condition &= self.new_record.data == self.real_record.data
+        # condition &= self.new_record.hostname == self.real_record.hostname
         return condition
 
     def record_exist(self):
         if self.query_method == "API":
-            # TODO: Use dynect API to resolve or not API calls are exepnsive
+            # TODO: Use dynect API to resolve or not API calls are expensive
             self.module.fail_json(msg="API CHECK NOT YET WORKING")
         else:
             # Use dig to resolve
             import subprocess
             dns_server = "@ns1.p22.dynect.net"
-            p = subprocess.Popen(["dig", "+short", self.newRecord.hostname, dns_server], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False)
+            p = subprocess.Popen(["dig", "+short", self.new_record.hostname, dns_server], stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE, shell=False)
             (output, err) = p.communicate()
             if p.returncode == 0:
                 if output:
                     output = output.partition("\n")[0]
                     if output[-1] == ".":
                         output = output[:-1]
-                    self.realRecord.data = output
-                    # record exist
+                    self.real_record.data = output
+                    # Record exist
+                    self.recordInfo = "dig: Record exists output : " + output
                     return True
             else:
-                self.module.fail_json(msg="unable to use dig command to resolve: %s" % self.newRecord.hostname)
+                self.module.fail_json(msg="unable to use dig command to resolve: %s" % self.new_record.hostname)
         # No match record does not exists
         return False
 
@@ -175,6 +187,7 @@ class DynectHost():
             else:
                 # Get record_id and Update record
                 self.dynect_get_record()
+                self.http_method = "PUT"
                 req_type = "PUT"
         # Create/update record
         return self.dynect_create_update_record(req_type)
@@ -207,7 +220,7 @@ def main():
                 query_method=dict(default="dig", choices=["dig", "api"]),
                 ttl=dict(default=3600, type="int"),
             ),
-            # For now dont support check_mode
+            # For now don't support check_mode
             supports_check_mode=False
         )
         if not dynect_client_found:
