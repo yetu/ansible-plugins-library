@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 #
-# WARNING This code is still under test
+# WARNING This code is still under development
 #
 __author__ = 'Adham Helal'
 
@@ -11,7 +11,7 @@ module: dynect
 short_description: Add or remove dns entries in dynect
 description:
    - Add or remove dynect from a remote host.
-version_added: "0.0.4"
+version_added: "0.0.5"
 options:
 
 dependencies:
@@ -37,7 +37,7 @@ class DynectHost():
         # Create compare classes
         self.real_record = HostTemplate()
         self.new_record = HostTemplate()
-        # Assign Parms
+        # Assign Parms.
         self.customer_name = self.module.params["customer_name"]
         self.username = self.module.params["username"]
         self.password = module.params["password"]
@@ -74,7 +74,6 @@ class DynectHost():
             self.recordInfo = self.rest_iface.execute('/Zone/' + self.new_record.domain, 'PUT', args)
         except Exception, e:
             self.module.fail_json(msg="Failed to publish domain : %s" % e)
-        self.status = self.recordInfo['status']
         if self.recordInfo['status'] == 'success':
             return True
         else:
@@ -93,7 +92,7 @@ class DynectHost():
         if not self.record_id:
             self.dynect_pre_request()
             try:
-                self.recordInfo = self.rest_iface.execute('/' + self.http_req + '/' + self.new_record.domain + '/' + 
+                self.recordInfo = self.rest_iface.execute('/' + self.http_req + '/' + self.new_record.domain + '/' +
                                                           self.new_record.hostname, 'GET')
             except Exception, e:
                 self.module.fail_json(msg="Failed to get dynect record: %s" % e)
@@ -115,7 +114,7 @@ class DynectHost():
         try:
             self.recordInfo = self.rest_iface.execute(req_string, req_type, args)
         except Exception, e:
-            self.module.fail_json(msg="Failed to create/update dynect record request: %s, type:%s, Error: %s" % 
+            self.module.fail_json(msg="Failed to create/update dynect record request: %s, type:%s, Error: %s" %
                                       (req_string, req_type, e))
         if self.recordInfo['status'] == 'success':
             return self.dynect_publish()
@@ -181,20 +180,24 @@ class DynectHost():
     def host_create(self):
         req_type = "POST"
         if self.record_exist():
-            if self.record_match():
-                # no need to change anything
+            if self.record_match():  # no need to change anything
                 return False
-            else:
-                # Get record_id and Update record
+            else:  # Get record_id and Update record
                 self.dynect_get_record()
                 self.http_method = "PUT"
                 req_type = "PUT"
-        # Create/update record
-        return self.dynect_create_update_record(req_type)
+        if self.module.check_mode:
+            return True
+        else:
+            # Create/update record
+            return self.dynect_create_update_record(req_type)
 
     def host_delete(self):
         if self.record_exist():
-            return self.dynect_delete_record()
+            if self.module.check_mode:
+                return True
+            else:
+                return self.dynect_delete_record()
         else:
             return False
 
@@ -220,8 +223,7 @@ def main():
                 query_method=dict(default="dig", choices=["dig", "api"]),
                 ttl=dict(default=3600, type="int"),
             ),
-            # For now don't support check_mode
-            supports_check_mode=False
+            supports_check_mode=True
         )
         if not dynect_client_found:
             module.fail_json(msg="The ansible dynect module requires DynectDNS library. use 'pip install DynectDNS' ")
