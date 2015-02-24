@@ -1,6 +1,4 @@
 #!/usr/bin/env python
-
-#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 #
 # WARNING This code is still under dev
@@ -13,6 +11,7 @@ DOCUMENTATION = '''
 '''
 
 initd_string = '''#!/bin/bash
+# export PS4='+(${BASH_SOURCE}:${LINENO}): ${FUNCNAME[0]:+${FUNCNAME[0]}(): }'
 
 NAME="$name"
 DESC="$desc"
@@ -24,6 +23,7 @@ EXEC_CMD="$exec_cmd"
 EXEC_ARGS="$exec_args"
 STOP_CMD="$stop_cmd"
 TIMEOUT=$timeout
+LOG_FILE=$log_file
 WAIT_TILL_TIMEOUT="$wait_till_timeout"
 START_METHOD="$start_method"
 
@@ -41,7 +41,7 @@ isRunning() {
 }
 
 GetPid() {
-    pgrep -f "$GREP_FOR"
+    pgrep -d " " -f "$GREP_FOR"
     echo $!
 }
 
@@ -51,7 +51,7 @@ ProcessFailed() { echo "[ FAILED ]" && exit 1; }
 GetCond(){
     # $1 final call out of time? 0 : no 1: yes
     # $2 failure code? 0 : process should exist 1: process should not exist
-    pid_status=$(isRunning)
+    PID_STATUS=$(isRunning)
     if [ $1 -eq 0 ]; then
         if [ $WAIT_TILL_TIMEOUT -eq 1 ]; then
             echo -n "."
@@ -82,8 +82,14 @@ StartDaemon() {
     else
         echo -n  "Starting $NAME "
         [ $IGNORE_PLAY_PID  == 1 ] && rm -f $BASE_DIR/RUNNING_PID
-        #Start quite background uid and gid
-        start-stop-daemon --start --quiet --background --name $NAME --chdir $BASE_DIR --chuid $RUN_AS_USER --group $RUN_AS_GROUP --startas $EXEC_CMD -- $EXEC_ARGS
+        if [ $START_METHOD == "start-stop-daemon" ]; then
+            #Start quite background uid and gid
+            start-stop-daemon --start --quiet --background --name $NAME --chdir $BASE_DIR --chuid $RUN_AS_USER --group $RUN_AS_GROUP --startas $EXEC_CMD -- $EXEC_ARGS
+        else
+            #nohup
+            cd $BASE_DIR
+            nohup sudo -u $RUN_AS_USER $EXEC_CMD $EXEC_ARGS >> $LOG_FILE 2>&1 &
+        fi
         [ $? -ne 0 ] && echo "[ FAILED ]" && exit 1
         WaitN $START_CODE
     fi
@@ -96,7 +102,7 @@ StopDaemon() {
     else
         PID="$(GetPid)"
         echo -n "Stopping $NAME "
-        $STOP_CMD "$PID"
+        $STOP_CMD $PID
         [ $? -ne 0 ] && echo "[ FAILED ]" && exit 1
         WaitN $STOP_CODE
     fi
@@ -130,7 +136,7 @@ exit 0
 '''
 
 
-class DaemonScript():
+class DaemonScript(object):
     def __init__(self, module):
         self.module = module
         self.file_sha256 = None
@@ -146,6 +152,9 @@ class DaemonScript():
             self.module.params["run_user"] = getpass.getuser()
         if self.module.params["run_group"] is None:
             self.module.params["run_group"] = getpass.getuser()  # NEEDS fix will break
+        if self.module.params["log_file"] is not None and self.module.params["start_method"] == "start-stop-daemon":
+            self.module.fail_json(msg="start-stop-daemon does not support logging")
+
         self.file_args = self.module.load_file_common_arguments(module.params)
 
     def write_to_dest(self, filename, initd_content):
@@ -207,6 +216,7 @@ def main():
             stop_cmd=dict(default="kill -9", required=False),
             timeout=dict(default=5, required=False, type="int"),
             wait_till_timeout=dict(default=1, choices=[0, 1], required=False, type="int"),
+            log_file=dict(default=None, required=False),
             ignore_play_pid=dict(default=True, choices=BOOLEANS, required=False, type="bool"),
             start_method=dict(default="start-stop-daemon", choices=["start-stop-daemon", "nohup"]),
         ),
