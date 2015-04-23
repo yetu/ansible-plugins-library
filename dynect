@@ -119,7 +119,7 @@ class DynectHost():
         if self.recordInfo['status'] == 'success':
             return self.dynect_publish()
         else:
-            return False
+            self.module.fail_json(msg="Status is not success. Record info='%s'" % self.recordInfo)
 
     def dynect_delete_record(self):
         self.dynect_get_record()
