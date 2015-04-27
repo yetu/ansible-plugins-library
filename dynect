@@ -11,7 +11,7 @@ module: dynect
 short_description: Add or remove dns entries in dynect
 description:
    - Add or remove dynect from a remote host.
-version_added: "0.0.5"
+version_added: "0.0.6"
 options:
 
 dependencies:
@@ -98,6 +98,7 @@ class DynectHost():
                 self.module.fail_json(msg="Failed to get dynect record: %s" % e)
             if self.recordInfo['status'] != 'success':
                 self.module.fail_json(msg="Failed to get dynect record : %s" % self.recordInfo)
+            #TODO: Might be inc
             self.record_id = self.recordInfo["data"]
 
     def dynect_create_update_record(self, req_type="POST"):
@@ -106,9 +107,9 @@ class DynectHost():
         if req_type == "POST":
             req_string = '/' + self.http_req + '/' + self.new_record.domain + '/' + self.new_record.hostname
         elif req_type == "PUT":
-            if len(self.record_id[0]) == 0:
+            if not self.record_id:
                 # Will fail if record is different type. i.e. original record is A and updating to CNAME
-                self.module.fail_json(msg="Request returned an empty JSON. This probably your try")
+                self.module.fail_json(msg="Request returned an empty JSON record ID. Record Info='%s" % self.recordInfo)
             else:
                 req_string = self.record_id[0]
         try:
