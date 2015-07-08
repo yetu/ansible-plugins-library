@@ -1,8 +1,7 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
+#!/usr/bin/python
 
 __author__ = 'Adham Helal'
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 DOCUMENTATION = '''
 ---
@@ -351,13 +350,14 @@ class JoyentCloud():
                 self.changed = self.server_stop()
         interval = ('Request took %s sec.' % t.interval)  # Time call
         if self.module.check_mode:
-            self.module.exit_json(changed=self.changed, msg=self.msg, timer=interval)
+            self.module.exit_json(changed=self.changed, msg=self.msg, machine_name=self.name, timer=interval)
         elif self.state == "absent":
-            self.module.exit_json(changed=self.changed, msg=self.msg, timer=interval, id=self.machine.id, ips=None)
+            self.module.exit_json(changed=self.changed, msg=self.msg, machine_name=self.name, timer=interval,
+                                  id=self.machine.id, ips=None)
         else:
-            self.module.exit_json(changed=self.changed, msg=self.msg, timer=interval, id=self.machine.id,
-                                  ips=self.machine.instance.ips, state=self.machine.instance.state,
-                                  dataset=self.machine.instance.dataset)
+            self.module.exit_json(changed=self.changed, msg=self.msg, machine_name=self.name,
+                                  timer=interval, id=self.machine.id, ips=self.machine.instance.ips,
+                                  state=self.machine.instance.state, dataset=self.machine.instance.dataset)
 
 
 def main():
@@ -380,7 +380,7 @@ def main():
         supports_check_mode=True
     )
     if not smartdc_client_found:
-        module.fail_json(msg="The ansible joyent module requires smartdc library. use 'pip install smartdc' ")
+            module.fail_json(msg="The ansible joyent module requires smartdc library. use 'pip install smartdc' ")
 
     JoyentCloud(module).main()
 
